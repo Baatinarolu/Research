@@ -7,9 +7,49 @@ const TAPE_MAP = {"S&P 500": "SPX500", "NASDAQ": "NAS100", "DOW": "US30", "FTSE 
 const INDEX_CURRENCY = {UK100: "GBP", GER40: "EUR", FRA40: "EUR", EUSTX50: "EUR", JPN225: "JPY",
   AUS200: "AUD", HK50: "HKD", IN50: "INR", CHN50: "CNY"};
 
+/* ───────────────── storage (persistent localStorage + memory fallback)
+   localStorage is per-browser, per-origin. If the browser blocks it
+   (private mode, third-party-cookie blocking in an embedded preview),
+   writes throw — we detect that once, keep working in-memory for the
+   session, and show a visible warning instead of failing silently. */
+const memStore = {};
+let storageOK = true;
+try {
+  const __probe = "__pw_probe__";
+  localStorage.setItem(__probe, "1");
+  localStorage.removeItem(__probe);
+} catch(e) { storageOK = false; }
+
+function loadJSON(k, fallback){
+  try {
+    const raw = storageOK ? localStorage.getItem(k) : (Object.prototype.hasOwnProperty.call(memStore, k) ? memStore[k] : null);
+    if (raw === null || raw === undefined) return fallback;
+    const v = JSON.parse(raw);
+    return v ?? fallback;
+  } catch(e){ return fallback; }
+}
+let _storageWarned = false;
+function showStorageWarning(){
+  if (_storageWarned) return;
+  _storageWarned = true;
+  const b = document.getElementById("storageBanner");
+  if (b) b.hidden = false;
+}
+function saveJSON(k, v){
+  const s = JSON.stringify(v);
+  if (!storageOK) { memStore[k] = s; showStorageWarning(); return; }
+  try {
+    localStorage.setItem(k, s);
+  } catch(e){
+    storageOK = false;
+    memStore[k] = s;
+    showStorageWarning();
+  }
+}
+
 let state = {
   groups: {}, currencies: [], allSymbols: [], tab: "FOREX",
-  symbol: "EUR/USD", data: null, chart: null, chartMarkers: [], tf: "1M",
+  symbol: "EUR/USD", data: null, chart: null, chartMarkers: [], tf: loadJSON("pw_tf", "1M"),
   calendar: [], calFilter: "pair",
   view: "stories", sentFilter: "ALL", timeFilter: 0, bucketFilter: "ALL",
   scanning: false, pendingSymbol: null, progressTimer: null,
@@ -24,8 +64,6 @@ let state = {
 };
 
 /* ───────────────── storage / utils */
-function loadJSON(k, fallback){ try { const v = JSON.parse(localStorage.getItem(k)); return v ?? fallback; } catch(e){ return fallback; } }
-function saveJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function keyOf(a){ return (a.title || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 80); }
 function fmtPrice(p, type){
@@ -201,6 +239,7 @@ $("starBtn").addEventListener("click", () => {
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   state.tab = b.dataset.tab;
+  saveJSON("pw_tab", state.tab);
   $("tabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
   renderWatch();
 });
@@ -604,6 +643,7 @@ function renderSaved(){
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 async function loadChart(tf){
   const d = state.data; if (!d) return;
+  if (state.tf !== tf) saveJSON("pw_tf", tf);
   state.tf = tf;
   $("tfGroup").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.tf === tf));
   if (state.demoMode) { setDemoChart(tf); return; }
@@ -995,6 +1035,7 @@ async function scan(sym, isAuto){
     $("symbolInput").value = j.instrument.display;
     $("lastScan").textContent = `Last scan: ${new Date().toLocaleTimeString("en-GB")} · ${j.stats.storyCount} stories / ${j.stats.total} headlines · heat ${j.heat}`;
     pushRecent(j.instrument.display);
+    saveJSON("pw_last_symbol", j.instrument.display);
     renderAll();
     loadChart(state.tf);
     loadHealth();
@@ -1525,12 +1566,26 @@ function exitDemo(){
 (async function boot(){
   tickClock();
   applySettings();
+  const savedTab = loadJSON("pw_tab", "");
+  if (savedTab && $("tabs").querySelector('button[data-tab="' + savedTab + '"]')) {
+    state.tab = savedTab;
+    $("tabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.tab === savedTab));
+  }
+  const lastSym = loadJSON("pw_last_symbol", "");
+  if (lastSym) $("symbolInput").value = lastSym;
+  const swc = $("storageWarnClose");
+  if (swc) swc.addEventListener("click", () => { $("storageBanner").hidden = true; });
+  if (!storageOK) showStorageWarning();
   renderRecent();
   renderSaved();
   loadTape();
   loadCalendar();
   loadStrength();
   try { await loadSymbols(); } catch(e){ log("Symbol list failed: " + e.message, "err"); }
+  log(storageOK
+    ? "Local storage available — My List, saved headlines, settings and last symbol persist across refreshes on this device."
+    : "WARNING: browser storage is blocked — changes work this session but will be lost on refresh. Open the site in its own browser tab (not an embedded preview/private window).",
+    storageOK ? "ok" : "err");
   log("PAIRWIRE v2 ready — chart, calendar, radar, alerts online. First scan…");
   scan($("symbolInput").value);
 })();

@@ -78,7 +78,10 @@ Press **Ctrl+K** for the fuzzy command palette (companies, currencies, tickers, 
 - **Currency strength board**, session clock, clickable ticker tape, feed-health status.
 - **Breaking alerts** while the page is open (banner + optional sound/browser notification),
   plus the server-side **cron monitor** for when it isn't (see DEPLOY.md).
-- **My List** pinning, saved headlines, recent scans (stored in your browser).
+- **My List** pinning, saved headlines, recent scans (stored in your browser). Your last
+  scanned instrument, chart timeframe and watchlist tab are also restored on refresh. If the
+  browser blocks local storage (private mode / embedded preview frame), an amber banner warns
+  that changes only last for the session — nothing fails silently.
 - **Reading guide + fictional DEMO mode** — “? HOW TO READ THIS” explains LOW/MEDIUM/HIGH,
   every score, pair direction and the risks of trading through news. **DEMO** loads an invented
   EUR/USD scan (headlines, price, chart and calendar) under a permanent banner, pauses live

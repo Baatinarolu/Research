@@ -5,7 +5,8 @@ instrument** — forex pairs (including unlisted crosses), stocks, indices, cryp
 and macro gauges — then scores it, charts it, and watches it for breaking headlines.
 
 Flat print/terminal design (light **WIRE** + dark **TERMINAL** themes). No gradients, no glass,
-no generic "AI app" styling. **Zero dependencies and no API keys.**
+no generic "AI app" styling. **Zero required dependencies and no API keys** — the optional
+Neon sync adds one package (`psycopg`) that is only imported when `DATABASE_URL` is set.
 
 ## Run it 24/7 on Vercel (recommended)
 
@@ -82,6 +83,11 @@ Press **Ctrl+K** for the fuzzy command palette (companies, currencies, tickers, 
   scanned instrument, chart timeframe and watchlist tab are also restored on refresh. If the
   browser blocks local storage (private mode / embedded preview frame), an amber banner warns
   that changes only last for the session — nothing fails silently.
+- **Optional cross-device sync via Neon Postgres** — set `DATABASE_URL` and the same My List,
+  saved headlines, recents and settings follow an anonymous device ID across browsers. A
+  top-bar **SYNC: ON/OFF/ERROR** indicator shows the state; any database failure falls back to
+  local storage automatically. The same database makes cron alert de-duplication reliable
+  across serverless cold starts. Setup: see **[DEPLOY.md](DEPLOY.md)**.
 - **Reading guide + fictional DEMO mode** — “? HOW TO READ THIS” explains LOW/MEDIUM/HIGH,
   every score, pair direction and the risks of trading through news. **DEMO** loads an invented
   EUR/USD scan (headlines, price, chart and calendar) under a permanent banner, pauses live
@@ -125,7 +131,8 @@ GET /api/radar?symbols=EURUSD,GBPJPY ranked by news heat (max 12)
 GET /api/strength                    8 major currencies ranked by today's % vs USD
 GET /api/tape                        ticker-tape quotes
 GET /api/symbols                     watchlist groups + 34 currencies
-GET /api/health                      runtime + per-process feed status
+GET /api/health                      runtime + per-process feed status + database status
+GET|POST /api/sync?uid=<uuid>        optional Neon cross-device sync (no DATABASE_URL → {"enabled": false})
 GET|POST /api/cron                   secured background monitor (see DEPLOY.md)
 ```
 
@@ -139,15 +146,28 @@ news-scanner/
 ├── api/
 │   ├── _pairwire.py        the engine: resolving, scoring, clustering, bias, radar…
 │   ├── _http.py            shared HTTP handler ("_" helper, not an endpoint)
+│   ├── _db.py              optional Neon Postgres layer (only active with DATABASE_URL)
+│   ├── _stdlib_pin.py      import guard: api/calendar.py must not shadow stdlib calendar
 │   └── scan.py chart.py tape.py strength.py radar.py
-│       calendar.py symbols.py health.py cron.py    (one Vercel Function each)
+│       calendar.py symbols.py health.py cron.py sync.py   (one Vercel Function each)
+├── db/
+│   └── schema.sql          Neon schema (auto-applied on first sync, or run manually)
+├── public/static/sync.js   DOM-free cloud merge logic (unit-tested, loaded before app.js)
+├── tests/                  unittest + node:test suites (run: see DEPLOY.md)
 ├── local_server.py         local dev server (same dispatcher as production)
 ├── vercel.json             functions (60s), daily cron, headers, outputDirectory
 ├── .python-version         3.12
-├── requirements.txt        empty on purpose — standard library only
-├── .env.example            optional cron/alert settings (website needs none)
-├── DEPLOY.md               Vercel deployment + 24/7 guide
+├── requirements.txt        stdlib-only by default; psycopg added only for optional Neon sync
+├── .env.example            optional cron/alert/database settings (website needs none)
+├── DEPLOY.md               Vercel deployment + 24/7 + Neon setup guide
 └── .github/workflows/pairwire-cron.yml.example   optional free 15-min scheduler
+```
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests     # engine/DB validation (14 tests; +7 with psycopg installed)
+node --test tests/sync.test.mjs           # cloud merge logic (6 tests)
 ```
 
 ## Honest limitations
@@ -155,8 +175,9 @@ news-scanner/
 - Prices are **delayed** and for reference only — trade off your broker feed.
 - Sentiment/bias/risk are transparent headline rule-scores, **not financial advice**. Wording
   rules can miss sarcasm, context, guidance buried in an article, or what was already priced in.
-- Serverless has no shared memory: caches, feed-status and cron alert de-duplication are
-  per-instance (best-effort). Add Vercel KV/a database if you ever need guarantees.
+- Serverless has no shared memory: caches and feed-status are per-instance (best-effort).
+  Cron alert de-duplication is per-instance memory too **unless** `DATABASE_URL` is set, in
+  which case Neon Postgres makes it reliable across cold starts (see DEPLOY.md).
 - Google News RSS is a personal-use aggregation feed. For licensed low-latency wire data,
   replace `fetch_google_news()` in `api/_pairwire.py` with a paid provider — the
   scoring/clustering/UI pipeline stays identical.

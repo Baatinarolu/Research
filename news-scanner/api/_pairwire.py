@@ -25,6 +25,11 @@ from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 from threading import Lock
 
+try:
+    import _stdlib_pin  # noqa: F401  (api/calendar.py would otherwise shadow stdlib calendar)
+except ImportError:
+    pass
+
 # NOTE: keep this plain — Yahoo's chart endpoint returns HTTP 429 for full Chrome UA strings
 # but accepts a bare "Mozilla/5.0" (verified live). Google News / RSS feeds accept it too.
 UA = {"User-Agent": "Mozilla/5.0"}
@@ -1308,11 +1313,18 @@ def symbols_payload():
 def health_payload():
     with _status_lock:
         feeds = dict(_status)
+    database = {"configured": False, "enabled": False}
+    try:
+        from _db import db_status
+        database = db_status()
+    except Exception:
+        pass
     return {
         "ok": True,
         "time": datetime.now(timezone.utc).isoformat(),
         "environment": "Vercel" if os.environ.get("VERCEL") else "local",
         "feeds": feeds,
+        "database": database,
         "note": "Feed status and caches are per-process; on Vercel each serverless instance has its own memory. "
                 "A successful /api/scan response is the authoritative live check.",
     }
@@ -1412,13 +1424,26 @@ def cron_payload():
                     "key": re.sub(r"[^a-z0-9]", "", a["title"].lower())[:80],
                 })
     alerts.sort(key=lambda x: (-(x.get("score") or 0), -x["ts"]))
-    # Best-effort de-duplication. This survives while Vercel reuses the same instance;
-    # a brand-new cold instance can re-send. Use a real store (KV/DB) for guaranteed de-dupe.
-    seen = set(cache_get("cron:seen-alerts", 6 * 3600) or [])
-    fresh = [a for a in alerts if a["key"] not in seen][:10]
-    for a in fresh:
-        seen.add(a["key"])
-    cache_set("cron:seen-alerts", list(seen)[-300:])
+    # De-duplication: Neon Postgres when configured (survives cold instances,
+    # guaranteed once-only alerts), otherwise best-effort per-instance memory.
+    all_keys = [a["key"] for a in alerts]
+    fresh_keys = None
+    try:
+        import _db
+        if _db.db_enabled():
+            unseen = _db.cron_filter_unseen(all_keys)
+            if unseen is not None:
+                fresh_keys = set(unseen)
+                _db.cron_mark_seen(unseen)
+    except Exception as e:
+        print(f"cron dedupe via database failed, using memory: {e!r}", flush=True)
+    if fresh_keys is None:
+        seen = set(cache_get("cron:seen-alerts", 6 * 3600) or [])
+        fresh_keys = {k for k in all_keys if k not in seen}
+        for k in fresh_keys:
+            seen.add(k)
+        cache_set("cron:seen-alerts", list(seen)[-300:])
+    fresh = [a for a in alerts if a["key"] in fresh_keys][:10]
 
     hottest = rows[0] if rows else None
     lines = [f"PAIRWIRE monitor — {datetime.now(timezone.utc).strftime('%a %d %b %H:%M UTC')}"]
@@ -1437,7 +1462,7 @@ def cron_payload():
         "note": "Website availability does not depend on cron. Alert de-duplication is best-effort per serverless instance.",
     }
 
-def handle_api(path, qs, headers=None):
+def handle_api(path, qs, headers=None, body=b"", method="GET"):
     """Returns (http_status, json_payload)."""
     path = (path or "").rstrip("/") or "/"
     if path == "/api/scan":
@@ -1461,6 +1486,9 @@ def handle_api(path, qs, headers=None):
         return 200, symbols_payload()
     if path in ("/api/health", "/health"):
         return 200, health_payload()
+    if path == "/api/sync":
+        from _db import handle_sync
+        return handle_sync(method, qs, body)
     if path == "/api/cron":
         if not _cron_authorized(headers or {}):
             return 401, {"error": "Unauthorized cron request. Set CRON_SECRET in Vercel and call with "

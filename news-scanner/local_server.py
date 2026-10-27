@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "public" / "static"
 sys.path.insert(0, str(ROOT / "api"))
+import _stdlib_pin  # noqa: E402,F401  (pins stdlib calendar ahead of api/calendar.py)
 from _http import PairwireHandler  # noqa: E402
 
 MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",

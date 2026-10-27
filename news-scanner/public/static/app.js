@@ -40,11 +40,133 @@ function saveJSON(k, v){
   if (!storageOK) { memStore[k] = s; showStorageWarning(); return; }
   try {
     localStorage.setItem(k, s);
+    if (k !== "pw_uid" && typeof scheduleSync === "function") scheduleSync();
   } catch(e){
     storageOK = false;
     memStore[k] = s;
     showStorageWarning();
   }
+}
+
+/* ───────────────── Neon cloud sync (optional)
+   When the deployment has DATABASE_URL, /api/sync mirrors the local data to
+   Neon Postgres so My List, saved headlines, recents and settings follow the
+   user across browsers/devices. localStorage remains the offline source of
+   truth; every merge is additive and every failure falls back to local only. */
+const SYNC_SETTING_KEYS = ["pw_theme", "pw_interval", "pw_sound", "pw_compact",
+                           "pw_notify", "pw_tf", "pw_tab", "pw_last_symbol"];
+let sync = { enabled: false, online: false, inflight: false, queued: false, timer: null, paused: false };
+
+function getUid(){
+  let id = loadJSON("pw_uid", null);
+  if (!id) { id = PW.uuidv4(); saveJSON("pw_uid", id); }
+  return id;
+}
+function setSyncStatus(kind, label){
+  const el = $("syncStatus");
+  if (!el) return;
+  el.textContent = "SYNC: " + label;
+  el.className = "tb-group sync-" + kind;
+}
+function apiFetch(url, opts, ms){
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms || 9000);
+  return fetch(url, Object.assign({}, opts || {}, { signal: ctrl.signal }))
+    .finally(() => clearTimeout(timer));
+}
+function buildSyncPayload(){
+  const recentTs = loadJSON("pw_recent_ts", {});
+  const recent = getRecent().map(symbol => ({ symbol, ts: recentTs[symbol] || Math.floor(Date.now() / 1000) }));
+  const saved = Object.entries(state.saved).map(([key, v]) => Object.assign({ key }, v));
+  const settings = {};
+  for (const k of SYNC_SETTING_KEYS) {
+    const v = loadJSON(k, null);
+    if (v !== null) settings[k] = v;
+  }
+  return {
+    watchlist: state.myList.slice(0, PW.CAPS.watchlist),
+    saved: saved.slice(0, PW.CAPS.saved),
+    recent,
+    settings,
+  };
+}
+async function pushSync(){
+  if (!sync.enabled || !storageOK || sync.paused) return;
+  if (sync.inflight) { sync.queued = true; return; }
+  sync.inflight = true;
+  try {
+    const res = await apiFetch("/api/sync?uid=" + encodeURIComponent(getUid()), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildSyncPayload()),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    sync.online = true;
+    setSyncStatus("on", "ON");
+  } catch(e) {
+    sync.online = false;
+    setSyncStatus("err", "ERROR · LOCAL ONLY");
+    sync.queued = true;
+  } finally {
+    sync.inflight = false;
+    if (sync.queued) { sync.queued = false; scheduleSync(2000); }
+  }
+}
+function scheduleSync(delay){
+  if (!sync.enabled || !storageOK || sync.paused) return;
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(pushSync, delay || 1000);
+}
+async function pullSync(){
+  if (!storageOK) { setSyncStatus("off", "OFF · STORAGE BLOCKED"); return; }
+  let j;
+  try {
+    const res = await apiFetch("/api/sync?uid=" + encodeURIComponent(getUid()), {}, 8000);
+    j = await res.json();
+  } catch(e) {
+    // Network/endpoint failure: stay fully local and retry pushes later.
+    sync.enabled = true;
+    setSyncStatus("err", "ERROR · LOCAL ONLY");
+    scheduleSync(3000);
+    return;
+  }
+  if (!j.enabled) { sync.enabled = false; setSyncStatus("off", "OFF · LOCAL ONLY"); return; }
+  sync.enabled = true;
+  sync.paused = true; // don't echo the merge back as a push storm
+  try {
+    const localSaved = loadJSON("pw_saved", {});
+    const localRecent = loadJSON("pw_recent", []);
+    const localRecentTs = loadJSON("pw_recent_ts", {});
+    const localSettings = {};
+    for (const k of SYNC_SETTING_KEYS) {
+      const v = loadJSON(k, null);
+      if (v !== null) localSettings[k] = v;
+    }
+
+    const watch = PW.mergeWatchlist(loadJSON("pw_mylist", []), j.watchlist);
+    const saved = PW.mergeSaved(localSaved, j.saved);
+    const rec = PW.mergeRecent(localRecent, localRecentTs, j.recent);
+    const settings = PW.mergeSettings(localSettings, j.settings || {});
+
+    saveJSON("pw_mylist", watch); state.myList = watch;
+    saveJSON("pw_saved", saved); state.saved = saved;
+    saveJSON("pw_recent", rec.symbols);
+    saveJSON("pw_recent_ts", rec.ts);
+    for (const [k, v] of Object.entries(settings)) saveJSON(k, v);
+
+    applySettings();
+    if (settings.pw_last_symbol) $("symbolInput").value = settings.pw_last_symbol;
+    state.tab = loadJSON("pw_tab", state.tab);
+    $("tabs").querySelectorAll("button").forEach(x =>
+      x.classList.toggle("on", x.dataset.tab === state.tab));
+    renderWatch(); updateStarBtn(); renderSaved(); renderRecent();
+  } finally {
+    sync.paused = false;
+  }
+  sync.online = true;
+  setSyncStatus("on", "ON");
+  scheduleSync(400); // converge: upload the merged result so deletions propagate
 }
 
 let state = {
@@ -248,7 +370,13 @@ $("tabs").addEventListener("click", (e) => {
 function getRecent(){ return loadJSON("pw_recent", []); }
 function pushRecent(disp){
   let arr = getRecent().filter(x => x !== disp);
-  arr.unshift(disp); saveJSON("pw_recent", arr.slice(0, 8)); renderRecent();
+  arr.unshift(disp); arr = arr.slice(0, 8);
+  saveJSON("pw_recent", arr);
+  const tsMap = loadJSON("pw_recent_ts", {});
+  tsMap[disp] = Math.floor(Date.now() / 1000);
+  for (const k of Object.keys(tsMap)) if (!arr.includes(k)) delete tsMap[k];
+  saveJSON("pw_recent_ts", tsMap);
+  renderRecent();
 }
 function renderRecent(){
   const arr = getRecent();
@@ -1582,6 +1710,7 @@ function exitDemo(){
   loadCalendar();
   loadStrength();
   try { await loadSymbols(); } catch(e){ log("Symbol list failed: " + e.message, "err"); }
+  try { await pullSync(); } catch(e){ log("Cloud sync skipped: " + e.message, "warn"); }
   log(storageOK
     ? "Local storage available — My List, saved headlines, settings and last symbol persist across refreshes on this device."
     : "WARNING: browser storage is blocked — changes work this session but will be lost on refresh. Open the site in its own browser tab (not an embedded preview/private window).",

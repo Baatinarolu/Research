@@ -1,1 +1,7 @@
-# PAIRWIRE uses only the Python standard library — no packages to install.
+# PAIRWIRE runs on the Python standard library alone by default.
+#
+# This single package is OPTIONAL: it is only imported when DATABASE_URL is
+# configured (Neon Postgres cross-device sync + reliable cron de-duplication).
+# Without it — and without DATABASE_URL — every endpoint keeps working and the
+# app falls back to browser-local storage.
+psycopg[binary]>=3.1,<4

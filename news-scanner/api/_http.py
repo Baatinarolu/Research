@@ -7,6 +7,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _stdlib_pin  # noqa: E402,F401  (pins stdlib calendar before api/calendar.py can shadow it)
 from _pairwire import handle_api  # noqa: E402
 
 
@@ -25,10 +26,22 @@ class PairwireHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self):
         parsed = urllib.parse.urlparse(self.path)
-        if self.command == "POST" and parsed.path.rstrip("/") != "/api/cron":
+        if self.command == "POST" and parsed.path.rstrip("/") not in ("/api/cron", "/api/sync"):
             return self.send_json({"error": "Method not allowed"}, 405)
+        body = b""
+        if self.command == "POST":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if length > 65536:
+                return self.send_json({"error": "Payload too large"}, 413)
+            body = self.rfile.read(length) if length else b""
         try:
-            status, payload = handle_api(parsed.path, urllib.parse.parse_qs(parsed.query), self.headers)
+            status, payload = handle_api(
+                parsed.path,
+                urllib.parse.parse_qs(parsed.query),
+                self.headers, body, self.command)
             return self.send_json(payload, status)
         except Exception as e:
             print(f"API error on {parsed.path}: {e!r}", flush=True)

@@ -14,6 +14,8 @@
 <div class="topbar">
   <span class="tb-group" id="sessions">Sessions: —</span>
   <span class="tb-group">
+    <span id="syncStatus" class="tb-group sync-off">SYNC: CHECKING…</span>
+    <span class="tb-sep">|</span>
     <span id="feedStatus" class="feed-status">Feeds: checking…</span>
     <span class="tb-sep">|</span>
     <span id="clock">--:--:--</span> LOCAL
@@ -391,6 +393,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="/static/sync.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

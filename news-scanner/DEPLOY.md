@@ -121,6 +121,83 @@ instance, an alert can repeat. For guaranteed once-only alerts you'd add a small
 (Vercel KV/Upstash, a database) — deliberately not bundled so the default deploy stays
 account- and key-free.
 
+### Cross-device storage with Neon Postgres (optional)
+
+By default all personal data (My List, saved headlines, recents, theme and
+other settings) lives in the browser's `localStorage`, so it does not follow
+you between devices. Setting one environment variable, `DATABASE_URL`, turns
+on **Neon serverless Postgres** sync with no other code changes:
+
+- The browser keeps an anonymous random ID (`pw_uid`, a UUID v4 — no login,
+  no passwords, no personal data) and pushes its state to `/api/sync`.
+- On a new browser/device, the same ID restores everything after you copy it
+  across (see *Moving to another device* below); different IDs are separate
+  datasets. Treat the UUID as a secret — anyone holding it can read that
+  dataset.
+- The same database gives `/api/cron` **guaranteed alert de-duplication**
+  across serverless cold starts (the in-memory de-dupe remains as fallback).
+- Without `DATABASE_URL`, nothing changes: the app stays 100% browser-local
+  and `requirements.txt`'s one package is simply never imported.
+
+#### Setup (~5 minutes, free tier)
+
+1. Create a free project at <https://neon.tech> (GitHub login works). Pick the
+   region closest to your Vercel deployment.
+2. On the project **Dashboard → Connection Details**, choose **Pooled
+   connection string** (the host contains `-pooler`). Copy it — it looks like
+   `postgresql://USER:PASSWORD@ep-…-pooler.…neon.tech/neondb?sslmode=require`.
+3. In Vercel: **Project → Settings → Environment Variables**, add
+   `DATABASE_URL` = that string (all environments), then **Redeploy**.
+4. That's it. The tables in [`db/schema.sql`](db/schema.sql) are created
+   automatically on the first sync request (idempotent `CREATE TABLE IF NOT
+   EXISTS`). Verify:
+
+   ```bash
+   curl "https://YOUR-APP.vercel.app/api/health"            # database.enabled = true
+   curl "https://YOUR-APP.vercel.app/api/sync?uid=12345678-1234-4123-8234-1234567890ab"
+   # → {"enabled": true, "watchlist": [], "saved": [], ...}
+   ```
+
+   In the app, the top-bar indicator reads **SYNC: ON** (green). If the
+   database is ever unreachable it shows **SYNC: ERROR · LOCAL ONLY** —
+   local data keeps working and retries automatically.
+
+#### Optional: apply the schema manually
+
+```bash
+pip install "psycopg[binary]>=3.1,<4"
+psql "$DATABASE_URL" -f db/schema.sql     # or paste the file into Neon's SQL editor
+```
+
+#### Local development with the database
+
+```bash
+export DATABASE_URL="postgresql://…-pooler.…neon.tech/neondb?sslmode=require"
+pip install -r requirements.txt
+python3 local_server.py
+```
+
+#### Moving to another device
+
+The anonymous ID is the only credential. In the old browser, run
+`localStorage.getItem("pw_uid")` in the developer console; in the new browser
+on the same site, run `localStorage.setItem("pw_uid", "that-uuid")` and
+reload. Your data pulls down from Neon.
+
+#### What is stored
+
+| Table | Contents |
+|---|---|
+| `users` | Anonymous client UUID + first-seen / last-seen timestamps |
+| `watchlist` | My List symbols, per client |
+| `saved_headlines` | Saved headline key, title, link, source, timestamp, symbol |
+| `recent_scans` | Recently scanned symbols with last-scanned time |
+| `settings` | Theme, interval, sound, compact, notifications, timeframe, tab, last symbol |
+| `cron_alert_seen` | Alert de-dupe keys (7-day rolling window) |
+
+Payloads are validated and capped server-side (200 watchlist rows, 500 saved
+headlines, 20 recents, scalar settings only; max 60 KB per request).
+
 ### Usage/cost note
 
 Every open browser tab auto-rescans on the interval chosen in the app, and each scan

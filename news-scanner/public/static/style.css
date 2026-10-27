@@ -124,6 +124,9 @@ html[data-theme="terminal"] .scan-progress-bar{background:#f5a623}
 .storage-warn-tag{background:var(--Amber);color:#111;font-weight:800;font-size:12px;letter-spacing:.08em;padding:9px 12px;flex:none;display:flex;align-items:center}
 .storage-warn-text{flex:1;background:var(--Amber-bg);border:1px solid var(--Amber);border-left:none;color:var(--ink);font-family:Georgia,serif;font-size:14px;padding:8px 12px}
 .storage-warn-x{background:var(--Amber-bg);border:1px solid var(--Amber);border-left:none;font-size:18px;padding:0 12px;color:var(--Amber);cursor:pointer}
+.sync-on{color:var(--green);font-weight:800;letter-spacing:.04em}
+.sync-off{color:var(--muted);letter-spacing:.04em}
+.sync-err{color:var(--red);font-weight:800;letter-spacing:.04em}
 
 /* ── layout ── */
 .grid{max-width:1600px;margin:0 auto;padding:14px 16px 20px;display:grid;grid-template-columns:272px minmax(0,1fr) 332px;gap:16px;align-items:start}

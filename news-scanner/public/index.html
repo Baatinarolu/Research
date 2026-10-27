@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAIRWIRE — Pair, Stock &amp; Index News Intelligence Terminal</title>
+<meta name="description" content="Automatic news scanner for any forex pair, stock, index, crypto pair or commodity — with chart, economic calendar, bias scoring and breaking alerts.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23111'/%3E%3Ctext x='6' y='23' font-family='Georgia' font-size='19' fill='%23fff'%3EP%3C/text%3E%3Crect x='21' y='7' width='5' height='5' fill='%23b00020'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ══ TOP UTILITY BAR ══ -->
+<div class="topbar">
+  <span class="tb-group" id="sessions">Sessions: —</span>
+  <span class="tb-group">
+    <span id="feedStatus" class="feed-status">Feeds: checking…</span>
+    <span class="tb-sep">|</span>
+    <span id="clock">--:--:--</span> LOCAL
+    <span class="tb-sep">|</span>
+    <button id="paletteBtn" class="tb-btn" title="Search any instrument (Ctrl+K)">SEARCH&nbsp; Ctrl K</button>
+    <button id="themeBtn" class="tb-btn" title="Switch between Wire (light) and Terminal (dark)">THEME: WIRE</button>
+    <span class="live-dot" id="liveDot"></span><span id="liveLabel">LIVE SCAN</span>
+  </span>
+</div>
+
+<!-- ══ MASTHEAD ══ -->
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="brand">
+      <div class="brand-name">PAIR<span>WIRE</span></div>
+      <div class="brand-sub">News intelligence terminal — any pair · stock · index · crypto · commodity</div>
+    </div>
+    <div class="masthead-meta">
+      <div id="todayLine">—</div>
+      <div class="masthead-meta-small">Wire aggregation + delayed quotes + ForexFactory calendar · No API key · Not financial advice</div>
+      <div class="shortcuts">Shortcuts: <kbd>Ctrl K</kbd> search · <kbd>/</kbd> instrument box · <kbd>R</kbd> rescan · <kbd>1–4</kbd> filters</div>
+    </div>
+  </div>
+</header>
+
+<!-- ══ TICKER TAPE ══ -->
+<div class="tape-wrap"><div class="tape" id="tape">Loading market tape…</div></div>
+
+<!-- ══ SCAN CONSOLE ══ -->
+<section class="console">
+  <div class="console-row">
+    <label class="field-label" for="symbolInput">INSTRUMENT</label>
+    <input id="symbolInput" list="symbolList" type="text" value="EUR/USD" autocomplete="off" spellcheck="false"
+           placeholder="Any pair, ticker, index… GBP/JPY · USD/NGN · AAPL · NAS100 · BTCUSD · GOLD · DXY · US10Y">
+    <datalist id="symbolList"></datalist>
+    <button id="scanBtn" class="btn-scan">SCAN NOW ▸</button>
+    <button id="starBtn" class="btn-star" title="Add current instrument to My List">☆ MY LIST</button>
+    <button id="guideBtn" class="btn-small btn-outline" title="Plain-English guide to news levels, scores and trading-through-news risk">? HOW TO READ THIS</button>
+    <button id="demoBtn" class="btn-small btn-outline" title="Load a clearly labelled fictional example scan">DEMO</button>
+  </div>
+  <div class="scan-progress" id="scanProgress"><div class="scan-progress-bar" id="scanProgressBar"></div></div>
+
+  <div class="console-row console-row-2">
+    <div class="pair-builder">
+      <span class="field-label">BUILD ANY FX PAIR</span>
+      <select id="baseSel" aria-label="Base currency"></select><span class="slash">/</span><select id="quoteSel" aria-label="Quote currency"></select>
+      <button id="buildBtn" class="btn-small">SCAN PAIR</button>
+      <button id="swapBtn" class="btn-small btn-outline" title="Swap base and quote">⇄ SWAP</button>
+    </div>
+    <div class="console-controls">
+      <span class="field-label">AUTO-RESCAN</span>
+      <select id="intervalSel">
+        <option value="30">Every 30 sec</option>
+        <option value="60" selected>Every 1 min</option>
+        <option value="300">Every 5 min</option>
+        <option value="900">Every 15 min</option>
+        <option value="0">Off</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="soundChk"> Sound alert</label>
+      <button id="notifyBtn" class="btn-small btn-outline">Browser alerts: off</button>
+      <button id="exportCsvBtn" class="btn-small btn-outline">EXPORT CSV</button>
+      <button id="exportBriefBtn" class="btn-small btn-outline">EXPORT BRIEF</button>
+    </div>
+  </div>
+  <div class="console-row console-row-3">
+    <span class="countdown" id="countdown">Next scan: —</span>
+    <span class="last-scan" id="lastScan">Not scanned yet</span>
+    <span class="recent-row" id="recentRow"></span>
+  </div>
+</section>
+
+<!-- ══ DEMO BANNER ══ -->
+<div class="demo-banner" id="demoBanner" hidden>
+  <span class="demo-tag">DEMO MODE</span>
+  <span class="demo-text"><b>Fictional sample data for learning.</b> These headlines, prices, chart and calendar events were invented to show how to read the page. Live feeds for this scan are paused — nothing here is real market information.</span>
+  <button id="exitDemoBtn" class="btn-small">EXIT DEMO → LIVE</button>
+</div>
+
+<!-- ══ BREAKING BANNER ══ -->
+<div class="breaking" id="breakingBanner" hidden>
+  <span class="breaking-tag">BREAKING</span>
+  <a class="breaking-text" id="breakingText" href="#" target="_blank" rel="noopener">—</a>
+  <button id="breakingClose" class="breaking-x" aria-label="Dismiss">×</button>
+</div>
+
+<!-- ══ MAIN GRID ══ -->
+<main class="grid">
+
+  <!-- LEFT -->
+  <aside class="col-left">
+    <div class="panel sticky-a">
+      <div class="panel-head">WATCHLIST — CLICK TO SCAN <span class="head-right" id="watchMeta"></span></div>
+      <div class="tabs" id="tabs">
+        <button data-tab="MY">★ MY LIST</button>
+        <button data-tab="FOREX" class="on">FOREX</button>
+        <button data-tab="INDEX">INDICES</button>
+        <button data-tab="STOCK">STOCKS</button>
+        <button data-tab="CRYPTO">CRYPTO</button>
+        <button data-tab="COMMODITY">CMDTY</button>
+        <button data-tab="MACRO">MACRO</button>
+      </div>
+      <table class="watch-table" id="watchTable"><tbody><tr><td>Loading…</td></tr></tbody></table>
+      <div class="panel-foot">Anything not listed still scans — type it above (e.g. USD/NGN, SHOP, AVAXUSD), or scan a single currency like GBP or NGN. Star it to pin it here.</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">MARKET RADAR <span class="head-right" id="radarMeta"></span></div>
+      <div class="panel-tools">
+        <button id="radarBtn" class="btn-small">▸ SCAN RADAR</button>
+        <span class="tool-note">Ranks instruments by news heat right now</span>
+      </div>
+      <div id="radarBody" class="radar-body"><div class="note" style="padding:8px 10px">Radar idle — it runs automatically after the first scan, or press SCAN RADAR.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">SAVED HEADLINES <span class="head-right" id="savedCount">0</span></div>
+      <div id="savedBody" class="saved-body"><div class="note" style="padding:8px 10px">Press ☆ on any headline to pin it here. Saved on this device.</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">SCAN LOG <span class="head-right"><button id="clearLogBtn" class="head-btn">CLEAR</button></span></div>
+      <div class="scan-log" id="scanLog"><div>Terminal ready.</div></div>
+    </div>
+  </aside>
+
+  <!-- CENTER -->
+  <section class="col-center">
+    <div class="instrument-head" id="instHead"><div class="inst-loading">Scanning wires…</div></div>
+
+    <div class="brief" id="briefPanel"><div class="brief-head">DESK BRIEF — auto-generated from this scan</div><div id="briefBody" class="brief-body">…</div></div>
+
+    <div class="risk-panel" id="riskPanel">
+      <div class="risk-head"><span>NEWS CONDITIONS RISK — TRADING THROUGH NEWS</span><button id="riskGuideBtn" class="head-btn" type="button">WHAT THIS MEANS</button></div>
+      <div class="risk-body" id="riskBody">Assessing scheduled releases and headline pressure…</div>
+    </div>
+
+    <div class="panel chart-panel">
+      <div class="panel-head">PRICE CHART <span class="head-right" id="chartMeta">—</span></div>
+      <div class="chart-tools">
+        <div class="filter-group" id="tfGroup">
+          <button data-tf="1D">1D</button><button data-tf="5D">5D</button>
+          <button data-tf="1M" class="on">1M</button><button data-tf="6M">6M</button>
+          <button data-tf="1Y">1Y</button><button data-tf="5Y">5Y</button>
+        </div>
+        <span class="chart-legend" id="chartLegend">Candles: delayed Yahoo Finance · ◆ = high-impact headline (click it)</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart" height="300"></canvas>
+        <div class="chart-tip" id="chartTip" hidden></div>
+      </div>
+      <div class="flow-wrap">
+        <div class="flow-label">HEADLINE FLOW — LAST 24H <span id="flowMeta"></span></div>
+        <div class="flow-bars" id="flowBars"></div>
+      </div>
+    </div>
+
+    <div class="stats-strip" id="statsStrip"></div>
+
+    <div class="filter-bar">
+      <div class="filter-group" id="viewToggle">
+        <button data-view="stories" class="on">STORIES</button>
+        <button data-view="articles">ALL HEADLINES</button>
+      </div>
+      <div class="filter-group" id="sentFilters">
+        <button data-f="ALL" class="on">ALL</button>
+        <button data-f="UP">▲ BULLISH</button>
+        <button data-f="DOWN">▼ BEARISH</button>
+        <button data-f="HIGH">HIGH IMPACT</button>
+      </div>
+      <div class="filter-group" id="timeFilters">
+        <button data-t="0" class="on">ANY TIME</button>
+        <button data-t="3600">1H</button>
+        <button data-t="21600">6H</button>
+        <button data-t="86400">24H</button>
+        <button data-t="604800">7D</button>
+      </div>
+      <div class="filter-group" id="bucketFilters"></div>
+      <select id="tierSel" title="Source quality tier">
+        <option value="0">All sources</option>
+        <option value="1">Tier 1 only (Reuters tier)</option>
+        <option value="2">Tier 1 + 2</option>
+      </select>
+      <input id="textFilter" type="text" placeholder="Filter headlines… (inflation, Powell, earnings)">
+      <select id="sortSel">
+        <option value="time">Sort: Latest</option>
+        <option value="top">Sort: Top score</option>
+        <option value="impact">Sort: Impact</option>
+        <option value="relevance">Sort: Relevance</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="savedOnlyChk"> Saved only</label>
+      <button id="densityBtn" class="btn-small btn-outline">COMPACT: OFF</button>
+    </div>
+
+    <div class="news-meta" id="newsMeta"></div>
+    <div id="newsList"></div>
+    <button id="moreBtn" class="btn-more" hidden>SHOW MORE HEADLINES ▾</button>
+  </section>
+
+  <!-- RIGHT -->
+  <aside class="col-right">
+    <div class="panel" id="pricePanel">
+      <div class="panel-head">QUOTE</div>
+      <div id="priceBody" class="panel-body">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">NEWS BIAS METER <span class="head-note">pair-aware</span></div>
+      <div class="panel-body" id="biasBody">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">ECONOMIC CALENDAR <span class="head-note">ForexFactory</span></div>
+      <div class="panel-tools">
+        <div class="filter-group" id="calFilters">
+          <button data-c="pair" class="on">THIS INSTRUMENT</button>
+          <button data-c="high">ALL HIGH IMPACT</button>
+          <button data-c="all">ALL</button>
+        </div>
+      </div>
+      <div id="calBody" class="cal-body">Loading calendar…</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">CURRENCY STRENGTH — TODAY</div>
+      <div class="panel-body" id="strengthBody">Loading…</div>
+    </div>
+
+    <div class="panel" id="breakdownPanel">
+      <div class="panel-head">NEWS BREAKDOWN</div>
+      <div class="panel-body" id="breakdownBody">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">WHAT IS DRIVING IT</div>
+      <div class="panel-body" id="driversBody">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">SOURCES IN THIS SCAN</div>
+      <div class="panel-body" id="sourcesBody">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">RELATED INSTRUMENTS</div>
+      <div class="panel-body" id="relatedBody">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">NEWS LEVELS — PLAIN ENGLISH</div>
+      <div class="panel-body">
+        <div class="level-row"><span class="level-pill lvl-low">LOW · 0–37</span><span><b>Background.</b> Routine commentary, older stories or minor topics. Usually not a catalyst by itself — but “low” never means impossible to move.</span></div>
+        <div class="level-row"><span class="level-pill lvl-med">MEDIUM · 38–61</span><span><b>Worth reading.</b> Forecasts, speeches, second-tier data or relevant company news. Can move a pair if it changes expectations.</span></div>
+        <div class="level-row"><span class="level-pill lvl-high">HIGH · 62–100</span><span><b>Potentially market-moving.</b> Rate decisions, CPI/inflation, jobs, GDP, earnings or a fresh major-wire headline. Execution risk rises around these.</span></div>
+        <div class="level-row"><span class="level-pill lvl-cal">CALENDAR HIGH</span><span>ForexFactory's own expected-impact class for a <i>scheduled</i> release. Separate from PairWire's headline score — the actual market reaction depends on the surprise versus forecast.</span></div>
+        <div class="note"><b>Impact ≠ direction.</b> A high-impact story can push price up, down, or nowhere if it was already expected. Open <b>WHY THIS SCORE?</b> under any headline to audit the exact inputs.</div>
+        <button id="guideBtn2" class="btn-small" type="button" style="margin-top:8px">OPEN FULL READING GUIDE</button>
+      </div>
+    </div>
+
+    <details class="panel method">
+      <summary class="panel-head as-summary">HOW SCORING WORKS ▸</summary>
+      <div class="panel-body small-text">
+        <p><b>Wire searches.</b> A pair like GBP/JPY triggers 4 searches: the pair, pair forecasts, GBP + Bank of England, JPY + Bank of Japan — plus matching stories off the live CNBC &amp; MarketWatch wires.</p>
+        <p><b>Pair-aware bias.</b> Headlines are scored for headline direction <i>and</i> currency strength (hawkish/dovish, beats/misses). Strong quote-currency news counts <i>against</i> the pair. The bias meter blends pair flow, base strength and quote strength, weighted by impact, source tier and recency.</p>
+        <p><b>Impact score (0–100).</b> Macro keywords (rate decisions, CPI, NFP, earnings…), source tier (Reuters/Bloomberg class = Tier 1) and freshness. Bands: 0–37 low, 38–61 medium, 62–100 high. Every headline's <b>WHY THIS SCORE?</b> box lists the exact matched words and points.</p>
+        <p><b>News Conditions Risk (0–100).</b> A separate gauge for how disorderly trading conditions may be: imminent/recent scheduled releases, fresh high-impact bursts, news heat, an already-large daily move and headlines pulling both ways. It is <b>not</b> a direction forecast and <b>not</b> a probability of winning or losing.</p>
+        <p><b>Real vs calculated vs demo.</b> Headlines, timestamps, publishers, delayed prices and calendar entries come from live public feeds. Impact, relevance, bias, heat and risk are calculated estimates and can be wrong. Invented data appears <b>only</b> in DEMO mode, under a permanent banner.</p>
+        <p><b>Stories.</b> Near-identical headlines from different outlets are clustered into one story — expand “+N more outlets” to see the coverage.</p>
+        <p><b>Heat (radar).</b> Last-hour intensity + 24h volume + high-impact count + price move. Always read the story at the publisher before trading on it.</p>
+      </div>
+    </details>
+  </aside>
+</main>
+
+<footer class="footer">
+  PAIRWIRE v2 · Live headlines via Google News RSS aggregation + CNBC &amp; MarketWatch wires (headlines © their publishers) · Prices &amp; candles: Yahoo Finance, delayed · Calendar: ForexFactory via faireconomy.media · Impact / bias / heat / risk scores are PairWire calculations, not publisher ratings and not predictions · Fictional data appears only in the clearly bannered DEMO mode · <b>Not financial advice</b> · Verify every headline, release time and tradable price with the publisher / your broker before acting.
+</footer>
+
+
+<!-- ══ READING GUIDE ══ -->
+<div class="guide-overlay" id="guide" hidden>
+  <div class="guide-box" role="dialog" aria-modal="true" aria-label="How to read PairWire">
+    <div class="guide-top"><span>HOW TO READ THIS TERMINAL — NEWS LEVELS, SCORES &amp; TRADING-THROUGH-NEWS RISK</span><button id="guideClose" class="guide-x" type="button" aria-label="Close guide">×</button></div>
+    <div class="guide-body">
+      <p class="guide-lead">PairWire collects real headlines, then calculates scores to help you decide <b>what to read first</b> and <b>when conditions may be dangerous</b>. Nothing on this page predicts price or tells you to buy or sell.</p>
+
+      <h3>1. The 30-second reading order</h3>
+      <ol>
+        <li><b>News Conditions Risk + Calendar:</b> is a major release about to land, or just landed?</li>
+        <li><b>Desk Brief (plain English):</b> which side of the pair is the news pressure on?</li>
+        <li><b>Top Stories:</b> open <b>WHY THIS SCORE?</b>, then read the top story at the publisher.</li>
+        <li><b>Chart ◆ markers:</b> did price actually react when the headline landed?</li>
+        <li><b>Brokers last:</b> check live spread, margin and stop rules on your own platform — prices here are delayed.</li>
+      </ol>
+
+      <h3>2. News levels: what low / medium / high really mean</h3>
+      <table class="guide-table">
+        <tr><th>Level</th><th>Typical examples</th><th>How to treat it</th></tr>
+        <tr><td><b>LOW</b><br>Impact 0–37</td><td>Old commentary, minor data, routine filings, general market colour.</td><td>Background reading. Rarely a stand-alone reason for a fast move — but verify anything surprising at the source.</td></tr>
+        <tr><td><b>MEDIUM</b><br>Impact 38–61</td><td>PMI/sentiment surveys, central-bank speeches, forecasts, analyst actions, relevant company updates.</td><td>Can move price if it changes expectations. Read the details, not only the headline.</td></tr>
+        <tr><td><b>HIGH</b><br>Impact 62–100</td><td>Interest-rate decisions, CPI/PCE inflation, jobs/NFP, GDP, major earnings, tariffs, fresh top-wire breaking news.</td><td>Expect fast, two-way moves around publication. Spread and slippage risk rises. Wait for the actual number/details where possible.</td></tr>
+        <tr><td><b>CALENDAR High / Medium / Low</b></td><td>ForexFactory's expected sensitivity for a <i>scheduled</i> release, shown by the coloured bar in the calendar.</td><td>This is about the <i>event type</i>, before the result exists. A "High" event that lands exactly as forecast may barely move price.</td></tr>
+      </table>
+      <p><b>The market trades the surprise.</b> Reaction mainly depends on <b>Actual vs Forecast</b>, revisions to last month, and details inside the report — not on whether the number looks "good" in isolation. News can also be priced in before release ("buy the rumour, sell the fact").</p>
+
+      <h3>3. Every score on the page, translated</h3>
+      <table class="guide-table">
+        <tr><th>Score</th><th>Question it answers</th><th>How PairWire calculates it</th><th>What it does NOT mean</th></tr>
+        <tr><td><b>Impact</b> 0–100</td><td>How market-sensitive is this headline's topic?</td><td>Macro/earnings keywords + source tier + freshness + strong wording (filings churn is reduced).</td><td>Not a forecast of move size or direction.</td></tr>
+        <tr><td><b>Relevance</b> 0–100</td><td>How directly is it about this instrument?</td><td>Exact symbol/pair/company/currency matches and which wire search found it.</td><td>A relevant story can still be old, wrong or already priced in.</td></tr>
+        <tr><td><b>Story Score</b> 0–100</td><td>What should I read first?</td><td>42% relevance + 36% impact + 22% recency, plus a small multi-outlet coverage bonus.</td><td>Not a buy/sell signal.</td></tr>
+        <tr><td><b>Bias</b> −100…+100</td><td>Which way is headline pressure leaning?</td><td>Directional + hawkish/dovish wording. For pairs: base strength lifts the pair, quote strength pulls it down.</td><td>Not a probability. +40 does not mean "70% chance up".</td></tr>
+        <tr><td><b>Confidence</b> %</td><td>How much agreeing evidence backs the bias?</td><td>Story volume, high-impact count and agreement between bullish/bearish headlines.</td><td>Not the chance the bias is right.</td></tr>
+        <tr><td><b>Heat</b> 0–100</td><td>How much attention is on this instrument now?</td><td>Capped blend of last-hour flow, 24h volume, high-impact count, price move and publisher spread.</td><td>Busy ≠ bullish. Heat can be high during a crash.</td></tr>
+        <tr><td><b>Risk Index</b> 0–100</td><td>How disorderly may trading conditions be around news?</td><td>Imminent/recent calendar events, fresh high-impact bursts, heat, daily move and two-way headline conflict.</td><td>Not a chance of losing, and not a direction call.</td></tr>
+        <tr><td><b>Tier T1/T2/T3</b></td><td>How established is the publisher?</td><td>T1 major-wire class, T2 specialist wires, T3 everything else.</td><td>T1 can publish an early/incomplete flash; T3 can be first with a real local story.</td></tr>
+      </table>
+
+      <h3>4. Pair direction, with EUR/USD examples</h3>
+      <ul>
+        <li>“<b>Euro rises</b> after strong German data” → base (EUR) stronger → pressure <b>up</b> on EUR/USD.</li>
+        <li>“<b>US dollar jumps</b> as rate-cut bets fade” → quote (USD) stronger → pressure <b>down</b> on EUR/USD, even though the dollar headline sounds "bullish".</li>
+        <li>Both currencies strong (or both weak) → the <i>net</i> difference matters, which is why the Bias Meter shows base, quote and pair flow separately.</li>
+      </ul>
+
+      <h3>5. Risks of taking a trade during major news</h3>
+      <p>None of this says "never trade news" — it says know what changes around a release:</p>
+      <ul>
+        <li><b>Spread blow-out:</b> the buy/sell gap can widen many times over for seconds or minutes.</li>
+        <li><b>Slippage &amp; gaps:</b> market orders and stop-losses can fill well beyond the intended price; a stop is an instruction, not a guaranteed price (unless your broker explicitly guarantees it).</li>
+        <li><b>Whipsaw:</b> price can spike one way on the first number, then reverse when revisions/details are read.</li>
+        <li><b>Thin liquidity:</b> fewer resting orders means smaller trades move price further.</li>
+        <li><b>Broker conditions:</b> margin can rise, execution can slow, and some brokers restrict news trading — rules differ by broker.</li>
+        <li><b>Headline risk:</b> first flashes can be incomplete or corrected. A score cannot verify a story for you.</li>
+      </ul>
+      <p><b>Practical checklist:</b> confirm the time in your timezone → know forecast/previous → decide maximum loss <i>before</i> the release → assume worse fill quality than normal → if you do not understand the release, that itself is information.</p>
+
+      <h3>6. Is any of this fake or demo information?</h3>
+      <table class="guide-table">
+        <tr><th>Layer</th><th>Status</th></tr>
+        <tr><td>Headlines, links, timestamps, publishers</td><td><b>Real</b>, fetched live from Google News aggregation + CNBC/MarketWatch wires. Click any headline to verify it at the publisher.</td></tr>
+        <tr><td>Prices, candles, ranges</td><td><b>Real but delayed</b> (Yahoo Finance). Good for context, not for order execution.</td></tr>
+        <tr><td>Calendar events</td><td><b>Real scheduled events</b> (ForexFactory feed), with forecast/previous where published. Times can change.</td></tr>
+        <tr><td>Impact, relevance, bias, heat, risk, Desk Brief</td><td><b>Calculated by PairWire</b> from headline wording and timing. Transparent (see WHY THIS SCORE?) but fallible — they are estimates, not facts and not advice.</td></tr>
+        <tr><td>DEMO mode</td><td><b>Deliberately fictional.</b> Only active when you press DEMO, always under a red/amber banner, and live feeds for that scan are paused.</td></tr>
+      </table>
+
+      <h3>7. Worked fictional examples (not real news)</h3>
+      <div class="guide-example"><b>Example A — red-folder release in 22 minutes.</b> “US CPI due shortly; two high-impact previews just published.” Risk reads EXTREME mainly because of the imminent release. Correct reading: <i>conditions may be wild; direction unknown</i> — not "sell before CPI".</div>
+      <div class="guide-example"><b>Example B — bearish pair, bullish-sounding headline.</b> “Pound surges after Bank of England holds rates higher for longer.” For USD/GBP that is quote strength, so PairWire scores pressure <i>down</i> on USD/GBP. The headline is bullish GBP, bearish the pair.</div>
+      <div class="guide-example"><b>Example C — earnings beat, weak guidance.</b> “XYZ beats earnings but cuts outlook.” Direction words conflict; bias stays near zero and conflict raises the Risk Index. Correct reading: read the release; the guidance may matter more than the beat.</div>
+
+      <p style="margin-top:14px"><button id="guideDemoBtn" class="btn-small" type="button">LOAD THE FICTIONAL DEMO SCAN</button>
+      <button id="guideClose2" class="btn-small btn-outline" type="button">CLOSE GUIDE</button></p>
+      <p class="note">Education only. PairWire does not know your broker, account, strategy or risk tolerance and cannot tell you whether any trade is suitable.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ COMMAND PALETTE ══ -->
+<div class="palette-overlay" id="palette" hidden>
+  <div class="palette-box" role="dialog" aria-label="Instrument search">
+    <div class="palette-top"><span>SCAN INSTRUMENT</span><span class="palette-hint">↑ ↓ select · Enter scan · Esc close</span></div>
+    <input id="paletteInput" type="text" placeholder="Type a pair, company, ticker, currency… (e.g. naira, nvidia, nas, usd/jpy)" autocomplete="off" spellcheck="false">
+    <div id="paletteResults" class="palette-results"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

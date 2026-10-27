@@ -1,0 +1,27 @@
+# OPTIONAL free 15-minute background monitor for a Vercel HOBBY deployment
+# (Vercel's own cron on Hobby is limited to once per day).
+#
+# To activate:
+#   1. Rename this file to pairwire-cron.yml
+#   2. In this GitHub repo: Settings -> Secrets and variables -> Actions, add:
+#        PAIRWIRE_URL   = https://YOUR-APP.vercel.app   (no trailing slash)
+#        CRON_SECRET    = the same value you set in Vercel's env vars
+#   3. Push. Check the Actions tab after the first scheduled run.
+# Note: GitHub may delay scheduled workflows by several minutes; that is fine for news alerts.
+
+name: PAIRWIRE background monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PAIRWIRE cron scan
+        run: |
+          curl -fsS --max-time 90 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PAIRWIRE_URL }}/api/cron"

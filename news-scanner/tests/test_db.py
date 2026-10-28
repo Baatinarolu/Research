@@ -142,5 +142,59 @@ class SchemaSplitTests(unittest.TestCase):
         self.assertFalse(any(s.startswith("--") for s in chunks))
 
 
+class SchemaFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self._orig_path = _db.SCHEMA_PATH
+        self._orig_ready = _db._schema_ready
+        _db._schema_ready = False
+
+    def tearDown(self):
+        _db.SCHEMA_PATH = self._orig_path
+        _db._schema_ready = self._orig_ready
+
+    def test_inline_fallback_when_file_missing(self):
+        from pathlib import Path
+        _db.SCHEMA_PATH = Path("/nonexistent/pairwire/schema.sql")
+        executed = []
+
+        class Cur:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def execute(self, sql, params=None): executed.append(sql)
+
+        class Conn:
+            def cursor(self): return Cur()
+            def commit(self): pass
+
+        _db.ensure_schema(Conn())
+        joined = "\n".join(executed)
+        for table in ("users", "watchlist", "saved_headlines",
+                      "recent_scans", "settings", "cron_alert_seen"):
+            self.assertIn("CREATE TABLE IF NOT EXISTS %s" % table, joined)
+        self.assertEqual(joined.count("CREATE INDEX IF NOT EXISTS"), 5)
+        self.assertTrue(_db._schema_ready)
+
+    def test_inline_schema_matches_file_object_set(self):
+        file_stmts = _db._split_sql(_db.SCHEMA_PATH.read_text(encoding="utf-8"))
+        inline_stmts = _db._split_sql(_db.SCHEMA_SQL)
+        self.assertEqual(len(file_stmts), len(inline_stmts))
+
+        def signature(stmts):
+            return [" ".join(s.split()[:5]).upper() for s in stmts]
+
+        self.assertEqual(signature(file_stmts), signature(inline_stmts))
+
+    def test_split_sql_drops_comments(self):
+        stmts = _db._split_sql("-- hello\nCREATE TABLE a(x int);\n-- c\nCREATE INDEX i ON a(x);")
+        self.assertEqual(len(stmts), 2)
+        self.assertFalse(any(s.startswith("--") for s in stmts))
+
+    def test_semicolon_inside_comment_creates_no_phantom_statement(self):
+        sql = "-- every sync; there are no passwords here.\nCREATE TABLE a(x int);"
+        stmts = _db._split_sql(sql)
+        self.assertEqual(len(stmts), 1)
+        self.assertTrue(stmts[0].startswith("CREATE TABLE"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

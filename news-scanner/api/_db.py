@@ -85,20 +85,80 @@ def _connect():
     return psycopg.connect(_conninfo(), connect_timeout=8, autocommit=False)
 
 
+# Inline mirror of db/schema.sql. The file is the readable copy for manual
+# psql runs; this constant guarantees provisioning still works if the serverless
+# bundle ever omits the sibling db/ directory. Keep the two in sync — a test
+# enforces that every table/index in the file exists here too.
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    client_id    TEXT PRIMARY KEY,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS watchlist (
+    client_id  TEXT NOT NULL REFERENCES users(client_id) ON DELETE CASCADE,
+    symbol     TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (client_id, symbol)
+);
+CREATE TABLE IF NOT EXISTS saved_headlines (
+    client_id TEXT NOT NULL REFERENCES users(client_id) ON DELETE CASCADE,
+    key       TEXT NOT NULL,
+    title     TEXT NOT NULL,
+    link      TEXT NOT NULL DEFAULT '',
+    source    TEXT NOT NULL DEFAULT '',
+    ts        BIGINT NOT NULL DEFAULT 0,
+    symbol    TEXT NOT NULL DEFAULT '',
+    saved_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (client_id, key)
+);
+CREATE TABLE IF NOT EXISTS recent_scans (
+    client_id       TEXT NOT NULL REFERENCES users(client_id) ON DELETE CASCADE,
+    symbol          TEXT NOT NULL,
+    last_scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (client_id, symbol)
+);
+CREATE TABLE IF NOT EXISTS settings (
+    client_id  TEXT NOT NULL REFERENCES users(client_id) ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    value      JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (client_id, key)
+);
+CREATE TABLE IF NOT EXISTS cron_alert_seen (
+    key        TEXT PRIMARY KEY,
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_client ON watchlist(client_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_saved_client     ON saved_headlines(client_id, saved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recent_client    ON recent_scans(client_id, last_scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_settings_client  ON settings(client_id);
+CREATE INDEX IF NOT EXISTS idx_cron_seen_time   ON cron_alert_seen(first_seen);
+"""
+
+
+def _split_sql(sql):
+    """Split a script into executable statements, dropping '--' comment lines.
+
+    Comment lines are removed from the whole script first, so a semicolon
+    appearing inside a comment can never create a phantom statement.
+    """
+    cleaned = "\n".join(ln for ln in sql.splitlines()
+                        if not ln.strip().startswith("--"))
+    return [chunk.strip() for chunk in cleaned.split(";") if chunk.strip()]
+
+
 def ensure_schema(conn):
-    """Idempotent DDL, once per serverless instance."""
+    """Idempotent DDL, once per serverless instance. File first, inline fallback."""
     global _schema_ready
     if _schema_ready:
         return
-    sql = SCHEMA_PATH.read_text(encoding="utf-8")
-    statements = []
-    for chunk in sql.split(";"):
-        lines = [ln for ln in chunk.splitlines() if not ln.strip().startswith("--")]
-        stmt = "\n".join(lines).strip()
-        if stmt:
-            statements.append(stmt)
+    try:
+        sql = SCHEMA_PATH.read_text(encoding="utf-8")
+    except OSError:
+        sql = SCHEMA_SQL
     with conn.cursor() as cur:
-        for stmt in statements:
+        for stmt in _split_sql(sql):
             cur.execute(stmt)
     conn.commit()
     _schema_ready = True

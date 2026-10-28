@@ -5,7 +5,7 @@
 --     psql "$DATABASE_URL" -f db/schema.sql
 --
 -- Model: anonymous clients. The browser generates a random UUID (pw_uid) and
--- sends it with every sync; there are no passwords or personal accounts.
+-- sends it with every sync. There are no passwords or personal accounts.
 -- Anyone who knows a client_id can read that dataset, so the UUID is the
 -- secret — use 122 bits of randomness (crypto.randomUUID) and never share it.
 
